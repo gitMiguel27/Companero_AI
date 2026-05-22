@@ -1,3 +1,4 @@
+# core/prompts.py
 from langchain_core.prompts import PromptTemplate
 
 # -------------------------------------------------------
