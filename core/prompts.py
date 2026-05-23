@@ -49,7 +49,7 @@ Material de estudio:
 {content}
 ---
 
-Genera exactamente {num_qestions} preguantas de práctica BASADAS SOLO en el material anterior.
+Genera exactamente {num_questions} preguantas de práctica BASADAS SOLO en el material anterior.
 
 Formato obligatorio (respeta exactemente este formato):
 P1: [texto de la pregunta]
