@@ -70,7 +70,7 @@ def ingest_uploaded_file(file_path: str) -> list[str]:
     path = Path(file_path)
 
     if path.suffix.lower() == ".pdf":
-        text = extracted_text_from_pdf(file_path)
+        text = extract_text_from_pdf(file_path)
     else:
         # Fallback: treat as plain text file
         text = path.read_text(encoding="utf-8", errors="ignore")
