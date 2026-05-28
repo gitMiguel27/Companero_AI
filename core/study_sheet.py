@@ -36,14 +36,16 @@ def generate_study_sheet_from_pdf(topic: str, file_path: str) -> str:
     """
     Ingests a PDF and generates a study sheet from its content.
 
-    Separating PDF-based generation from text-based generation keeps each function focused and easy to test independently.
+    Returns both the study sheet AND the extracted content so the caller can use the content for question generation without re-processing the PDF.
 
     Arg:
         topic: The study subject.
         file_path: Path to the uploaded PDF on disk.
 
     Returns:
-        str: Formatted study sheet in Spanish (markdown).
+        tuple[str, str]: (study_sheet, pdf_content)
+            - study_sheet: Formatted study sheet in Spanish (markdown)
+            - pdf_content: Raw extracted text used for generation
     """
     chunks = ingest_uploaded_file(file_path)
 
@@ -51,12 +53,14 @@ def generate_study_sheet_from_pdf(topic: str, file_path: str) -> str:
         return "⚠️ No se pudo extraer texto el PDF. Verifica que el archivo no esté protegido o sea solo imágenes."
 
     # Use first few chunks as the content preview for the prompt
-    content_preview = "\n\n".join(chunk[:6])
+    content_preview = "\n\n".join(chunks[:6])
 
     # Store all chunks in memory
     store_chunks(chunks, topic=topic, source="pdf")
 
-    return generate_study_sheet(topic, content_preview, save_to_memory=False)
+    study_sheet = generate_study_sheet(topic, content_preview, save_to_memory=False)
+
+    return study_sheet, content_preview
 
 def generate_from_memory(topic: str) -> str:
     """
