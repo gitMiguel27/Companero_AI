@@ -198,6 +198,7 @@ OLLAMA_BASE_URL=http://localhost:11434
 MODEL_NAME=llama3.2
 CHROMA_PERSIST_DIR=./chroma_db
 UPLOAD_DIR=./uploads
+PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
 ```
 
 ```bash
@@ -395,12 +396,12 @@ Create `core/llm.py`:
 # core/llm.py
 import os
 from dotenv import load_dotenv
-from langchain_community.llms import Ollama
+from langchain_ollama import OllamaLLM
 
 load_dotenv()
 
 
-def get_llm(temperature: float = 0.5) -> Ollama:
+def get_llm(temperature: float = 0.5) -> OllamaLLM:
     """
     Returns a configured Ollama LLM instance pointed at Llama 3.2.
 
@@ -413,9 +414,9 @@ def get_llm(temperature: float = 0.5) -> Ollama:
         temperature: Creativity dial (0.0 = deterministic, 1.0 = very creative)
 
     Returns:
-        Ollama: A LangChain-compatible LLM ready to call.
+        OllamaLLM: A LangChain-compatible LLM ready to call.
     """
-    return Ollama(
+    return OllamaLLM(
         model=os.getenv("MODEL_NAME", "llama3.2"),
         base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         temperature=temperature,
@@ -430,7 +431,7 @@ This is the most important file in the project. Well-crafted prompts are the dif
 
 ```python
 # core/prompts.py
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STUDY SHEET PROMPT
@@ -582,7 +583,7 @@ Create `memory/embeddings.py`:
 
 ```python
 # memory/embeddings.py
-from langchain_community.embeddings import SentenceTransformerEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 
 
 def get_embeddings():
@@ -598,10 +599,10 @@ def get_embeddings():
     Subsequent uses load from local cache.
 
     Returns:
-        SentenceTransformerEmbeddings: An embedding function compatible
+        HuggingFaceEmbeddings: An embedding function compatible
         with LangChain and ChromaDB.
     """
-    return SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
+    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 ```
 
 ---
@@ -615,7 +616,7 @@ Create `memory/vector_store.py`:
 import os
 from dotenv import load_dotenv
 from langchain_chroma import Chroma
-from langchain.schema import Document
+from langchain_core.documents import Document
 from memory.embeddings import get_embeddings
 
 load_dotenv()
@@ -784,7 +785,6 @@ Create `core/study_sheet.py`:
 
 ```python
 # core/study_sheet.py
-from langchain.chains import LLMChain
 from core.llm import get_llm
 from core.prompts import STUDY_SHEET_TEMPLATE, TOPIC_EXTRACT_TEMPLATE, RAG_STUDY_SHEET_TEMPLATE
 from memory.vector_store import store_chunks, retrieve_context
@@ -808,7 +808,7 @@ def generate_study_sheet(topic: str, content: str, save_to_memory: bool = True) 
         str: Formatted study sheet in Spanish (markdown).
     """
     llm = get_llm(temperature=0.3)  # Low temp = factual, consistent output
-    chain = LLMChain(llm=llm, prompt=STUDY_SHEET_TEMPLATE)
+    chain = STUDY_SHEET_TEMPLATE | llm
 
     # Truncate content if very long — LLMs have context window limits
     # 3000 chars ≈ ~600 words, safe for most models
@@ -828,20 +828,21 @@ def generate_study_sheet_from_pdf(topic: str, file_path: str) -> str:
     """
     Ingests a PDF and generates a study sheet from its content.
 
-    Separating PDF-based generation from text-based generation keeps
-    each function focused and easy to test independently.
+    Returns both the study sheet AND the extracted content so the caller can use the content for question generation without re-processing the PDF.
 
-    Args:
-        topic:     The study subject.
+    Arg:
+        topic: The study subject.
         file_path: Path to the uploaded PDF on disk.
 
     Returns:
-        str: Formatted study sheet in Spanish (markdown).
+        tuple[str, str]: (study_sheet, pdf_content)
+            - study_sheet: Formatted study sheet in Spanish (markdown)
+            - pdf_content: Raw extracted text used for generation
     """
     chunks = ingest_uploaded_file(file_path)
 
     if not chunks:
-        return "⚠️ No se pudo extraer texto del PDF. Verifica que el archivo no esté protegido o sea solo imágenes."
+        return "⚠️ No se pudo extraer texto el PDF. Verifica que el archivo no esté protegido o sea solo imágenes."
 
     # Use first few chunks as the content preview for the prompt
     content_preview = "\n\n".join(chunks[:6])
@@ -849,7 +850,9 @@ def generate_study_sheet_from_pdf(topic: str, file_path: str) -> str:
     # Store all chunks in memory
     store_chunks(chunks, topic=topic, source="pdf")
 
-    return generate_study_sheet(topic, content_preview, save_to_memory=False)
+    study_sheet = generate_study_sheet(topic, content_preview, save_to_memory=False)
+
+    return study_sheet, content_preview
 
 
 def generate_from_memory(topic: str) -> str:
@@ -871,9 +874,8 @@ def generate_from_memory(topic: str) -> str:
         return f"⚠️ No se encontraron apuntes guardados sobre '{topic}'. Sube material nuevo para comenzar."
 
     llm = get_llm(temperature=0.3)
-    chain = LLMChain(llm=llm, prompt=RAG_STUDY_SHEET_TEMPLATE)
-    result = chain.invoke({"topic": topic, "context": context})
-    return result["text"]
+    chain = RAG_STUDY_SHEET_TEMPLATE | llm
+    return chain.invoke({"topic": topic, "context": context})
 
 
 def auto_detect_topic(content: str) -> str:
@@ -887,9 +889,8 @@ def auto_detect_topic(content: str) -> str:
         str: A 3–5 word topic title in Spanish.
     """
     llm = get_llm(temperature=0.1)  # Very low temp — we want a clean label
-    chain = LLMChain(llm=llm, prompt=TOPIC_EXTRACT_TEMPLATE)
-    result = chain.invoke({"content": content[:1000]})
-    return result["text"].strip()
+    chain = TOPIC_EXTRACT_TEMPLATE | llm
+    return chain.invoke({"content": content[:1000]}).strip()
 ```
 
 ---
@@ -900,7 +901,6 @@ Create `core/questions.py`:
 
 ```python
 # core/questions.py
-from langchain.chains import LLMChain
 from core.llm import get_llm
 from core.prompts import QUESTIONS_TEMPLATE
 from memory.vector_store import retrieve_context
@@ -919,7 +919,7 @@ def generate_questions(topic: str, content: str, num_questions: int = 5) -> list
         list[dict]: List of {"question": str, "answer": str} dicts.
     """
     llm = get_llm(temperature=0.5)
-    chain = LLMChain(llm=llm, prompt=QUESTIONS_TEMPLATE)
+    chain = QUESTIONS_TEMPLATE | llm
 
     content_preview = content[:3000] if len(content) > 3000 else content
 
@@ -1259,7 +1259,7 @@ def _handle_generate(topic: str, content: str, file_path: str, num_questions: in
             st.session_state.use_memory = False
 
         elif file_path:
-            study_sheet = generate_study_sheet_from_pdf(topic, file_path)
+            study_sheet, pdf_content = generate_study_sheet_from_pdf(topic, file_path)
             questions   = generate_questions(topic, content or "", num_questions)
             st.session_state.milestones["pdfs_uploaded"] += 1
 
