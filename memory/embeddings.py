@@ -14,6 +14,6 @@ def get_embeddings():
     Subsequent uses load from local cache.
 
     Returns:
-        SentenceTransformerEmbeddings: An embedding function compatible with LangChain and ChromaDB.
+        HuggingFaceEmbeddings: An embedding function compatible with LangChain and ChromaDB.
     """
     return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
