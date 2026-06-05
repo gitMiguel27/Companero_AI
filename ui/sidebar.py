@@ -129,6 +129,13 @@ def _handle_generate(topic: str, content: str, file_path: str, num_questions: in
 
         elif file_path:
             study_sheet, pdf_content = generate_study_sheet_from_pdf(topic, file_path)
+
+            # Guard against empty pdf_content on first run
+            # ChromaDB embedding model may not be fully loaded yet
+            if not pdf_content or len(pdf_content) < 50:
+                st.warning("⚠️ Reintentando generación de preguntas...")
+                study_sheet, pdf_content = generate_study_sheet_from_pdf(topic, file_path)
+
             questions = generate_questions(topic, pdf_content, num_questions)
             st.session_state.milestones["pdfs_uploaded"] += 1
 
